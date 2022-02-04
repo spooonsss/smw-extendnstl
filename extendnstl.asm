@@ -52,8 +52,7 @@ org $02904D							; bounce blocks
 org $02922D							;
 	LDY !RAM_ExtOAMIndex			;
 org $028B6C							; minor extended sprites
-	autoclean JML MinorExtOAM		;
-	NOP								;
+	JML MinorExtOAM					;
 org $028C6E							;
 	LDY !RAM_ExtOAMIndex			;
 org $028CFF							;
@@ -70,23 +69,30 @@ org $028F4D							;
 	LDY !RAM_ExtOAMIndex			;
 org $028FDD							;
 	LDY !RAM_ExtOAMIndex			;
-org $0299D7							; spinning coins
-	autoclean JML SpinningCoinOAM	;
-	NOP								;
+org $0299D4							; spinning coins
+	JML SpinningCoinOAM				;
+;  	NOP								;
 org $029A3D							;
 	LDY !RAM_ExtOAMIndex			;
-org $0296C3							; smoke images
-	autoclean JML SmokeImageOAM		;
+
+org $0296C0							; smoke images
+	JML SmokeImageOAM
+
+
 org $02974A							;
 	LDY !RAM_ExtOAMIndex			;
 org $02996C							;
 	LDY !RAM_ExtOAMIndex			;
-org $02ADBD							; score sprites
-	autoclean JML ScoreSpriteOAM	;
+
+org $02ADBA							; score sprites
+	; n.b. pixi patches this address. Don't use autoclean. See comments in ScoreSpriteOAM
+	JML ScoreSpriteOAM
+
 org $02AE9B							;
 	LDY !RAM_ExtOAMIndex			;
 org $00907A							; item box item
 	db $FC							; just move this one to the end
+
 org $029B16							; extended sprites
 	autoclean JML ExtendedSprOAM	;
 	NOP								;
@@ -240,46 +246,6 @@ BounceBlockOAM:
 .Return
 	JML $02904C|!base2
 
-MinorExtOAM:
-	BEQ .Return
-	STX $1698|!base
-	PHA
-	JSL GetExtOAMIndex
-	PLA
-	JML $028B71|!base2
-.Return
-	JML $028B74|!base2
-
-SpinningCoinOAM:
-	LDA $17D0|!base,x
-	BEQ .Return
-	PHA
-	JSL GetExtOAMIndex
-	PLA
-	JML $0299DC|!base2
-.Return
-	JML $0299DF|!base2
-
-SmokeImageOAM:
-	BEQ .Return
-	AND #$7F
-	PHA
-	JSL GetExtOAMIndex
-	PLA
-	JML $0296C7|!base2
-.Return
-	JML $0296D7|!base2
-
-ScoreSpriteOAM:
-	LDA $16E1|!base,x
-	BEQ .Return
-	PHA
-	JSL GetExtOAMIndex
-	PLA
-	JML $02ADC2|!base2
-.Return
-	JML $02ADC5|!base2
-
 ExtendedSprOAM:
 	LDA $170B|!base,x
 	BEQ .Return
@@ -372,3 +338,123 @@ FixContactGFX:
 	ldy !RAM_ExtOAMIndex
 	lda $17C8|!base,x
 	jml $0297B7|!base2
+
+
+; must put at start of freecode section
+macro PROT_JML(jml_addr)
+; asar rejects "prot read3($02ADBA+1)", so...
+db "PROT"
+db 3
+dl read3((<jml_addr>)+1)
+db "STOP"
+db 0
+endmacro
+
+macro CALL_PATCHED_JML(jml_addr)
+	assert read1(<jml_addr>) == $5C,"Run Pixi first, it should patch this address" ; $5C is JML opcode
+	; disable running this patch twice; <jml_addr>+1 will point to our code and not pixi's
+	; TODO probably could support patching twice with if statements
+	assert read3(read3(<jml_addr>+1)-3) != $004242,"Run Pixi first before patching again" ; should be (S)"TAR" when pixi is patched
+	JML.l read3(<jml_addr>+1)
+endmacro
+
+warnings push
+; Disable "freespace leaked" warning
+warnings disable W1011
+; pixi patches the address this calls this. We require pixi to be patched first, then call into pixi
+; n.b. new freecode here so pixi cleans it up but not our other freecode
+freecode
+%PROT_JML($02ADBA)
+
+dl $004242 ; we search for this tag to disable patching twice
+ScoreSpriteOAM:
+	LDA $16E1|!base,x ; aka !score_num
+	BEQ .Return
+	PHA
+	JSL GetExtOAMIndex
+	PLA
+	; call pixi
+	%CALL_PATCHED_JML($02ADBA)
+
+.Return
+	JML $02ADC5|!base2
+
+warnings pull
+
+
+
+warnings push
+; Disable "freespace leaked" warning
+warnings disable W1011
+; pixi patches the address this calls this. We require pixi to be patched first, then call into pixi
+; n.b. new freecode here so pixi cleans it up but not our other freecode
+freecode
+%PROT_JML($0296C0)
+
+dl $004242 ; we search for this tag to disable patching twice
+SmokeImageOAM:
+	LDA.w $17C0|!base,X ; aka !smoke_num
+	BEQ .Return
+	AND #$7F
+	PHA
+	JSL GetExtOAMIndex
+	PLA
+	; call pixi
+	%CALL_PATCHED_JML($0296C0)
+
+.Return
+	JML $0296D7|!base2
+
+warnings pull
+
+
+
+warnings push
+; Disable "freespace leaked" warning
+warnings disable W1011
+; pixi patches the address this calls this. We require pixi to be patched first, then call into pixi
+; n.b. new freecode here so pixi cleans it up but not our other freecode
+freecode
+%PROT_JML($0299D4)
+
+dl $004242 ; we search for this tag to disable patching twice
+SpinningCoinOAM:
+	STX.w $15E9|!base
+	LDA $17D0|!base,x ; aka !spinning_coing_num
+	BEQ .Return
+	PHA
+	JSL GetExtOAMIndex
+	PLA
+	; call pixi
+	%CALL_PATCHED_JML($0299D4)
+
+.Return
+	JML $0299DF|!base2
+
+warnings pull
+
+
+
+
+warnings push
+; Disable "freespace leaked" warning
+warnings disable W1011
+; pixi patches the address this calls this. We require pixi to be patched first, then call into pixi
+; n.b. new freecode here so pixi cleans it up but not our other freecode
+freecode
+%PROT_JML($028B6C)
+
+dl $004242 ; we search for this tag to disable patching twice
+MinorExtOAM:
+	BEQ .Return
+	STX $1698|!base
+	PHA
+	JSL GetExtOAMIndex
+	PLA
+	; call pixi
+	%CALL_PATCHED_JML($028B6C)
+
+.Return
+	JML $028B74|!base2
+
+warnings pull
